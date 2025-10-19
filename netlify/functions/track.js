@@ -22,7 +22,7 @@ exports.handler = async (event) => {
     const accessToken = tokenData.access_token;
 
     // Voeg rij toe in Excel
-    const graphUrl = `https://graph.microsoft.com/v1.0/me/drive/root:/EmailTracking.xlsx:/workbook/tables/TrackingTable/rows/add`;
+    const graphUrl = `https://graph.microsoft.com/v1.0/me/drive/root:/test%20data%20v1.xlsx:/workbook/tables/TrackingTable/rows/add`;
     await fetch(graphUrl, {
       method: 'POST',
       headers: {
