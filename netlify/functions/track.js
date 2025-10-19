@@ -1,56 +1,44 @@
-// netlify/functions/track.js
-// STAP 1: Vervang ALLES in je huidige track.js met deze code
-
-exports.handler = async (event, context) => {
-  const { email, campaign, source } = event.queryStringParameters || {};
-  const userAgent = event.headers['user-agent'] || '';
+exports.handler = async (event) => {
+  const { email, campaign, customer, country, pod } = event.queryStringParameters || {};
   const timestamp = new Date().toISOString();
-  
-  // STAP 2: Log lokaal (backup - blijft werken)
-  console.log(`Email opened: ${email}, Campaign: ${campaign}, Time: ${timestamp}`);
-  
-  // STAP 3: Verstuur tracking data naar n8n webhook
-  if (email && campaign) {
-    try {
-      // STAP 4: VERVANG DEZE URL MET JE ECHTE N8N WEBHOOK URL
-      const n8nWebhookUrl = 'https://mrzebeda.app.n8n.cloud/webhook-test/email-tracking';
-      
-      const trackingData = {
-        email: email,
-        campaign: campaign,
-        source: source || 'email',
-        timestamp: timestamp,
-        userAgent: userAgent,
-        action: 'email_opened',
-        // Extra data
-        date: new Date().toISOString().split('T')[0],
-        time: new Date().toLocaleTimeString('nl-NL')
-      };
-      
-      // STAP 5: Verstuur data naar n8n
-      const response = await fetch(n8nWebhookUrl, {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json'
-        },
-        body: JSON.stringify(trackingData)
-      });
-      
-      if (response.ok) {
-        console.log('Data successfully sent to n8n');
-      } else {
-        console.error('n8n webhook failed with status:', response.status);
-      }
-      
-    } catch (error) {
-      console.error('n8n webhook error:', error);
-      // Tracking pixel blijft werken ook als webhook faalt
-    }
+  const date = new Date().toISOString().split('T')[0];
+  const time = new Date().toLocaleTimeString('nl-NL');
+
+  const values = [[email || 'unknown', campaign || 'unknown', customer || 'unknown', country || 'unknown', pod || 'unknown', timestamp, date, time]];
+
+  try {
+    // Haal token op
+    const tokenResponse = await fetch(`https://login.microsoftonline.com/${process.env.TENANT_ID}/oauth2/v2.0/token`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+      body: new URLSearchParams({
+        grant_type: 'client_credentials',
+        client_id: process.env.CLIENT_ID,
+        client_secret: process.env.CLIENT_SECRET,
+        scope: 'https://graph.microsoft.com/.default'
+      })
+    });
+    const tokenData = await tokenResponse.json();
+    const accessToken = tokenData.access_token;
+
+    // Voeg rij toe in Excel
+    const graphUrl = `https://graph.microsoft.com/v1.0/me/drive/root:/EmailTracking.xlsx:/workbook/tables/TrackingTable/rows/add`;
+    await fetch(graphUrl, {
+      method: 'POST',
+      headers: {
+        Authorization: `Bearer ${accessToken}`,
+        'Content-Type': 'application/json'
+      },
+      body: JSON.stringify({ values })
+    });
+
+    console.log('Data sent to Excel via Graph API');
+  } catch (error) {
+    console.error('Graph API error:', error);
   }
-  
-  // STAP 6: Return tracking pixel (ongewijzigd)
+
+  // Return tracking pixel
   const pixel = Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNkYPhfDwAChwGA60e6kgAAAABJRU5ErkJggg==', 'base64');
-  
   return {
     statusCode: 200,
     headers: {
