@@ -59,10 +59,11 @@ class VATCalculator:
                 'Handelsregio': ['Handelsregio', 'Trade Region', 'Region', 'Regio', 'Handels regio'],
                 'Fiscaal land': ['Fiscaal land', 'Fiscal Country', 'Country', 'Land', 'Fiscaal-land', 'Fiscal land'],
                 'Tot. vrk. ex. BTW': [
-                    'Tot. vrk. ex. BTW', 'Total excl. VAT', 'Total Sales excl. VAT',
+                    'Tot. vrk. ex. BTW', 'Tot. vrk. ex. BTW (CC)', 'Total excl. VAT', 'Total Sales excl. VAT',
                     'Totaal verkoop ex. BTW', 'Tot vrk ex BTW', 'Verkoop excl. BTW',
                     'Tot. vrk. ex BTW', 'Tot vrk ex. BTW', 'Totaal excl BTW',
-                    'Total excl BTW', 'Bedrag excl. BTW', 'Bedrag ex. BTW'
+                    'Total excl BTW', 'Bedrag excl. BTW', 'Bedrag ex. BTW',
+                    'Tot. vrk. ex BTW (CC)', 'Tot vrk ex BTW (CC)'
                 ],
                 'BTW-nr.': ['BTW-nr.', 'BTW-nr', 'VAT Number', 'VAT-nr', 'BTW nummer', 'BTW nr'],
                 'BTW-hoog': ['BTW-hoog', 'VAT High', 'BTW hoog', 'BTW 19%', 'High VAT'],
@@ -140,17 +141,18 @@ class VATCalculator:
             col_mapping = {
                 'Land ISO-code': [
                     'Land ISO-code', 'Country ISO', 'ISO Code', 'Origin',
-                    'Land', 'Country Code', 'ISO-code', 'Landcode'
+                    'Land', 'Country Code', 'ISO-code', 'Landcode', 'Country of Origin'
                 ],
                 'Tot. ink. ex. BTW': [
-                    'Tot. ink. ex. BTW', 'Total excl. VAT', 'Total Purchase excl. VAT',
+                    'Tot. ink. ex. BTW', 'Tot. ink. ex. BTW (CC)', 'Total excl. VAT', 'Total Purchase excl. VAT',
                     'Totaal inkoop ex. BTW', 'Tot ink ex BTW', 'Inkoop excl. BTW',
                     'Tot. ink. ex BTW', 'Tot ink ex. BTW', 'Totaal excl BTW',
-                    'Total excl BTW', 'Bedrag excl. BTW', 'Bedrag ex. BTW'
+                    'Total excl BTW', 'Bedrag excl. BTW', 'Bedrag ex. BTW',
+                    'Tot. ink. ex BTW (CC)', 'Tot ink ex BTW (CC)'
                 ],
                 'Tot. BTW': [
                     'Tot. BTW', 'Total VAT', 'VAT', 'BTW', 'Totaal BTW',
-                    'Tot BTW', 'Total VAT Amount'
+                    'Tot BTW', 'Total VAT Amount', 'Tot. BTW (CC)'
                 ]
             }
 
