@@ -5,7 +5,9 @@
   "main": "src/agent.js",
   "scripts": {
     "start": "node src/agent.js",
+    "configure": "node src/configure.js",
     "setup": "node src/setup.js",
+    "test": "node test.js",
     "send": "node src/agent.js --send",
     "check": "node src/agent.js --check",
     "remind": "node src/agent.js --remind",
