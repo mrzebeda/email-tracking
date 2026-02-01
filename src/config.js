@@ -17,7 +17,7 @@ const config = {
 
   // SMTP
   smtp: {
-    host: process.env.SMTP_HOST || 'smtp.gmail.com',
+    host: process.env.SMTP_HOST || 'smtp.office365.com',
     port: parseInt(process.env.SMTP_PORT || '587'),
     secure: process.env.SMTP_SECURE === 'true',
     user: process.env.SMTP_USER,
@@ -79,7 +79,7 @@ function validateConfig() {
     name: 'SMTP email (SMTP_USER + SMTP_PASS)',
     ok: !!(config.smtp.user && config.smtp.pass),
     required: true,
-    help: 'Vul SMTP_USER en SMTP_PASS in je .env bestand.\n   Voor Gmail: maak een App Password aan via Google Account > Beveiliging.',
+    help: 'Vul SMTP_USER en SMTP_PASS in je .env bestand.\n   Voor Outlook/Office365: gebruik smtp.office365.com poort 587.\n   Voor Gmail: maak een App Password aan via Google Account > Beveiliging.',
   });
 
   // OpenAI

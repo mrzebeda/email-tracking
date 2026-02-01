@@ -2,11 +2,12 @@ const config = require('../config');
 const { getUnopenedEmails, logReminderSent, getAllRecords } = require('../excel/trackingLog');
 const { generateReminderEmail } = require('../email/templateGenerator');
 const { sendTrackedEmail } = require('../email/sender');
+const { lookupPricesForContact } = require('../excel/productReader');
 
 /**
  * Controleer en verstuur reminders voor ongeopende emails
  */
-async function processReminders(contacts, products) {
+async function processReminders(contacts, priceMatrix) {
   const unopened = getUnopenedEmails();
 
   if (unopened.length === 0) {
@@ -31,10 +32,13 @@ async function processReminders(contacts, products) {
     console.log(`\nReminder #${reminderNumber} voorbereiden voor ${contact.name} (${contact.email})...`);
 
     try {
+      // Zoek POD-specifieke prijzen voor dit contact
+      const pricing = priceMatrix ? lookupPricesForContact(priceMatrix, contact) : null;
+
       // Genereer reminder email
       const emailContent = await generateReminderEmail(
         contact,
-        products,
+        pricing,
         record.subject,
         reminderNumber
       );

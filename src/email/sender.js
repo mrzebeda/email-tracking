@@ -2,6 +2,7 @@ const nodemailer = require('nodemailer');
 const { v4: uuidv4 } = require('uuid');
 const config = require('../config');
 const { logEmailSent } = require('../excel/trackingLog');
+const { updateContactStatus } = require('../excel/contactReader');
 
 let transporter = null;
 
@@ -34,14 +35,14 @@ function injectTrackingPixel(html, trackingId, contact, campaign) {
     campaign: campaign || 'default',
     customer: contact.name || '',
     company: contact.company || '',
+    country: contact.country || '',
+    pod: contact.pod || '',
   });
 
   const trackingUrl = `${config.tracking.url}?${params.toString()}`;
 
-  // Voeg onzichtbare tracking pixel toe aan einde van email
   const pixel = `<img src="${trackingUrl}" width="1" height="1" style="display:block;width:1px;height:1px;border:0;" alt="" />`;
 
-  // Inject voor </body> of aan einde
   if (html.includes('</body>')) {
     return html.replace('</body>', `${pixel}</body>`);
   }
@@ -85,10 +86,16 @@ async function sendTrackedEmail(contact, emailContent, options = {}) {
       subject: emailContent.subject,
     });
 
-    console.log(`Email verzonden naar ${contact.email} (${info.messageId})`);
+    // Update status in contacten Excel
+    try {
+      await updateContactStatus(contact, 'Sent');
+    } catch {
+      // niet fataal als dit mislukt
+    }
+
     return { success: true, messageId: info.messageId, trackingId };
   } catch (error) {
-    console.error(`Fout bij verzenden naar ${contact.email}:`, error.message);
+    console.error(`  Fout bij verzenden naar ${contact.email}: ${error.message}`);
     return { success: false, error: error.message, trackingId };
   }
 }
@@ -100,10 +107,10 @@ async function testConnection() {
   initTransporter();
   try {
     await transporter.verify();
-    console.log('SMTP verbinding succesvol!');
+    console.log('  SMTP verbinding succesvol!');
     return true;
   } catch (error) {
-    console.error('SMTP verbinding mislukt:', error.message);
+    console.error('  SMTP verbinding mislukt:', error.message);
     return false;
   }
 }

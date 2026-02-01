@@ -3,8 +3,8 @@ const path = require('path');
 const config = require('../config');
 
 /**
- * Leest contacten/leads uit de Excel sheet.
- * Verwacht kolommen: Naam | Email | Bedrijf | Functie | Notities
+ * Leest klanten uit de Excel sheet.
+ * Verwacht kolommen: No | Company | Name | Country | POD | Continent | Incoterms | E-mail adress | Email_Sent | Email_Sent_Date | Email_Status
  */
 async function readContacts(filePath) {
   const resolvedPath = path.resolve(filePath || config.files.contacts);
@@ -13,12 +13,11 @@ async function readContacts(filePath) {
   try {
     await workbook.xlsx.readFile(resolvedPath);
   } catch (err) {
-    console.error(`Kan contacten bestand niet lezen: ${resolvedPath}`);
-    console.error('Tip: Voer eerst "npm run setup" uit om template bestanden aan te maken.');
+    console.error(`  Kan contacten bestand niet lezen: ${resolvedPath}`);
     throw err;
   }
 
-  const worksheet = workbook.getWorksheet('Contacten') || workbook.worksheets[0];
+  const worksheet = workbook.worksheets[0];
   if (!worksheet) {
     throw new Error('Geen worksheet gevonden in contacten bestand.');
   }
@@ -29,21 +28,31 @@ async function readContacts(filePath) {
 
   headerRow.eachCell((cell, colNumber) => {
     const val = (cell.value || '').toString().toLowerCase().trim();
-    if (val.includes('naam') || val.includes('name')) headers.name = colNumber;
-    if (val.includes('email') || val.includes('e-mail')) headers.email = colNumber;
-    if (val.includes('bedrijf') || val.includes('company')) headers.company = colNumber;
-    if (val.includes('functie') || val.includes('title') || val.includes('rol')) headers.title = colNumber;
-    if (val.includes('branche') || val.includes('industry') || val.includes('sector')) headers.industry = colNumber;
-    if (val.includes('notitie') || val.includes('notes') || val.includes('opmerking')) headers.notes = colNumber;
-    if (val.includes('land') || val.includes('country')) headers.country = colNumber;
-    if (val.includes('taal') || val.includes('language')) headers.language = colNumber;
+    if (val === 'no' || val === '#') headers.no = colNumber;
+    if (val.includes('company') || val.includes('bedrijf')) headers.company = colNumber;
+    if (val.includes('name') || val.includes('naam')) headers.name = colNumber;
+    if (val.includes('country') || val.includes('land')) headers.country = colNumber;
+    if (val === 'pod') headers.pod = colNumber;
+    if (val.includes('continent')) headers.continent = colNumber;
+    if (val.includes('incoterms') || val.includes('inco')) headers.incoterms = colNumber;
+    if (val === 'email_sent') headers.emailSent = colNumber;
+    else if (val === 'email_sent_date') headers.emailSentDate = colNumber;
+    else if (val === 'email_status') headers.emailStatus = colNumber;
+    else if (val.includes('e-mail') || val.includes('email')) headers.email = colNumber;
   });
 
-  // Fallback
-  if (!headers.name) headers.name = 1;
-  if (!headers.email) headers.email = 2;
-  if (!headers.company) headers.company = 3;
-  if (!headers.title) headers.title = 4;
+  // Fallback posities
+  if (!headers.no) headers.no = 1;
+  if (!headers.company) headers.company = 2;
+  if (!headers.name) headers.name = 3;
+  if (!headers.country) headers.country = 4;
+  if (!headers.pod) headers.pod = 5;
+  if (!headers.continent) headers.continent = 6;
+  if (!headers.incoterms) headers.incoterms = 7;
+  if (!headers.email) headers.email = 8;
+  if (!headers.emailSent) headers.emailSent = 9;
+  if (!headers.emailSentDate) headers.emailSentDate = 10;
+  if (!headers.emailStatus) headers.emailStatus = 11;
 
   worksheet.eachRow((row, rowNumber) => {
     if (rowNumber === 1) return;
@@ -51,20 +60,56 @@ async function readContacts(filePath) {
     const email = row.getCell(headers.email).value;
     if (!email) return;
 
+    const emailStr = String(
+      typeof email === 'object' && email.text ? email.text : email
+    ).trim().toLowerCase();
+    if (!emailStr || !emailStr.includes('@')) return;
+
     contacts.push({
+      no: parseInt(row.getCell(headers.no).value) || rowNumber - 1,
+      company: String(row.getCell(headers.company).value || '').trim(),
       name: String(row.getCell(headers.name).value || '').trim(),
-      email: String(email).toString().trim().toLowerCase(),
-      company: String(row.getCell(headers.company || 3).value || '').trim(),
-      title: String(row.getCell(headers.title || 4).value || '').trim(),
-      industry: String(row.getCell(headers.industry || 5).value || '').trim(),
-      notes: String(row.getCell(headers.notes || 6).value || '').trim(),
-      country: String(row.getCell(headers.country || 7).value || 'NL').trim(),
-      language: String(row.getCell(headers.language || 8).value || 'nl').trim(),
+      country: String(row.getCell(headers.country).value || '').trim(),
+      pod: String(row.getCell(headers.pod).value || '').trim(),
+      continent: String(row.getCell(headers.continent).value || '').trim(),
+      incoterms: String(row.getCell(headers.incoterms).value || '').trim(),
+      email: emailStr,
+      emailSent: String(row.getCell(headers.emailSent).value || '').trim(),
+      emailSentDate: String(row.getCell(headers.emailSentDate).value || '').trim(),
+      emailStatus: String(row.getCell(headers.emailStatus).value || '').trim(),
+      // Bewaar rij en kolom info voor terugschrijven
+      _row: rowNumber,
+      _headers: headers,
     });
   });
 
-  console.log(`${contacts.length} contacten geladen uit ${resolvedPath}`);
+  console.log(`  ${contacts.length} contacten geladen uit ${resolvedPath}`);
   return contacts;
 }
 
-module.exports = { readContacts };
+/**
+ * Werk de Email_Sent, Email_Sent_Date en Email_Status kolommen bij in het contacten Excel
+ */
+async function updateContactStatus(contact, status) {
+  const resolvedPath = path.resolve(config.files.contacts);
+  const workbook = new ExcelJS.Workbook();
+
+  try {
+    await workbook.xlsx.readFile(resolvedPath);
+  } catch {
+    return; // bestand niet leesbaar, skip
+  }
+
+  const worksheet = workbook.worksheets[0];
+  if (!worksheet || !contact._row) return;
+
+  const row = worksheet.getRow(contact._row);
+  row.getCell(contact._headers.emailSent).value = 'Yes';
+  row.getCell(contact._headers.emailSentDate).value = new Date().toISOString().split('T')[0];
+  row.getCell(contact._headers.emailStatus).value = status || 'Sent';
+  row.commit();
+
+  await workbook.xlsx.writeFile(resolvedPath);
+}
+
+module.exports = { readContacts, updateContactStatus };
