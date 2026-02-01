@@ -1,3 +1,6 @@
+# Data bestanden (bevatten persoonlijke/klant data)
+data/*.xlsx
+
 # Logs
 logs
 *.log

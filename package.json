@@ -1,0 +1,26 @@
+{
+  "name": "ai-sales-email-tracker",
+  "version": "1.0.0",
+  "description": "AI Sales Agent - Automated email campaigns with built-in open tracking, Excel integration, and smart reminders",
+  "main": "src/agent.js",
+  "scripts": {
+    "start": "node src/agent.js",
+    "setup": "node src/setup.js",
+    "send": "node src/agent.js --send",
+    "check": "node src/agent.js --check",
+    "remind": "node src/agent.js --remind",
+    "dashboard": "node src/agent.js --dashboard",
+    "server": "node src/tracking/server.js"
+  },
+  "dependencies": {
+    "dotenv": "^16.4.5",
+    "exceljs": "^4.4.0",
+    "express": "^4.21.0",
+    "nodemailer": "^6.9.15",
+    "openai": "^4.67.0",
+    "uuid": "^10.0.0"
+  },
+  "engines": {
+    "node": ">=18.0.0"
+  }
+}
