@@ -1,14 +1,17 @@
 const fs = require('fs');
 const path = require('path');
 const config = require('./config');
-const { printConfigStatus, canSendEmails, hasAI } = require('./config');
+const { printConfigStatus, canSendEmails, hasAI, canMonitorInbox } = require('./config');
 const { readPriceMatrix, lookupPricesForContact, formatPrice, formatPriceTable, summarizePriceMatrix } = require('./excel/productReader');
 const { readContacts } = require('./excel/contactReader');
-const { initTrackingLog, saveToExcel, printDashboard, getAllRecords } = require('./excel/trackingLog');
+const { initTrackingLog, saveToExcel, printDashboard, getAllRecords, logReply } = require('./excel/trackingLog');
 const { generateSalesEmail, generateFallbackEmail } = require('./email/templateGenerator');
 const { sendTrackedEmail, testConnection } = require('./email/sender');
 const { processReminders, showReminderCandidates } = require('./reminder/reminderService');
 const { startServer } = require('./tracking/server');
+const { checkForReplies, testImapConnection, printReplies } = require('./email/replyMonitor');
+const { processAutoReply } = require('./email/autoResponder');
+const { updateContactReplied } = require('./excel/contactReader');
 
 const args = process.argv.slice(2);
 
@@ -28,6 +31,7 @@ async function main() {
   if (args.includes('--check'))     return await runDashboard();
   if (args.includes('--dashboard')) return await runDashboard();
   if (args.includes('--remind'))    return await runReminders();
+  if (args.includes('--replies'))   return await runCheckReplies();
   if (args.includes('--server'))    return await startServer();
   if (args.includes('--status'))    return printConfigStatus();
 
@@ -65,44 +69,48 @@ async function runInteractive() {
   while (running) {
     const records = getAllRecords();
     const opened = records.filter((r) => r.opens > 0).length;
+    const replied = records.filter((r) => r.replied).length;
+    const imapStatus = canMonitorInbox() ? '' : ' (IMAP niet ingesteld)';
 
     console.log('');
-    console.log('  ┌──────────────────────────────────────┐');
-    console.log('  │           HOOFDMENU                   │');
-    console.log('  ├──────────────────────────────────────┤');
-    console.log('  │                                      │');
-    console.log('  │  1.  Nieuwe campagne versturen       │');
-    console.log('  │  2.  Tracking dashboard              │');
-    console.log('  │  3.  Reminders versturen             │');
-    console.log('  │  4.  Prijslijst bekijken / laden     │');
-    console.log('  │  5.  Klanten bekijken / laden        │');
-    console.log('  │  6.  SMTP verbinding testen          │');
-    console.log('  │  7.  Tracking server starten         │');
-    console.log('  │  8.  Configuratie bekijken           │');
-    console.log('  │  9.  Afsluiten                       │');
-    console.log('  │                                      │');
-    console.log('  └──────────────────────────────────────┘');
+    console.log('  ┌───────────────────────────────────────────┐');
+    console.log('  │              HOOFDMENU                      │');
+    console.log('  ├───────────────────────────────────────────┤');
+    console.log('  │                                             │');
+    console.log('  │  1.  Nieuwe campagne versturen              │');
+    console.log('  │  2.  Tracking dashboard                     │');
+    console.log('  │  3.  Reminders versturen                    │');
+    console.log('  │  4.  Inbox checken (replies)' + imapStatus.padEnd(16) + '│');
+    console.log('  │  5.  Prijslijst bekijken / laden            │');
+    console.log('  │  6.  Klanten bekijken / laden               │');
+    console.log('  │  7.  SMTP / IMAP verbinding testen          │');
+    console.log('  │  8.  Tracking server starten                │');
+    console.log('  │  9.  Configuratie bekijken                  │');
+    console.log('  │  0.  Afsluiten                              │');
+    console.log('  │                                             │');
+    console.log('  └───────────────────────────────────────────┘');
 
     if (records.length > 0) {
-      console.log(`  Emails: ${records.length} verzonden | ${opened} geopend | ${records.length - opened} wachten`);
+      console.log(`  Emails: ${records.length} verzonden | ${opened} geopend | ${replied} beantwoord | ${records.length - opened} wachten`);
     }
 
-    const choice = await ask('\n  Keuze [1-9]: ');
+    const choice = await ask('\n  Keuze [0-9]: ');
 
     switch (choice.trim()) {
       case '1': await runSendCampaign(ask); break;
       case '2': await runDashboard(); break;
       case '3': await runReminders(ask); break;
-      case '4': await runPriceManager(ask); break;
-      case '5': await runContactManager(ask); break;
-      case '6': await runSmtpTest(); break;
-      case '7':
+      case '4': await runCheckReplies(ask); break;
+      case '5': await runPriceManager(ask); break;
+      case '6': await runContactManager(ask); break;
+      case '7': await runConnectionTest(); break;
+      case '8':
         console.log('\n  Tracking server starten... (Ctrl+C om te stoppen)');
         await startServer();
         running = false;
         break;
-      case '8': printConfigStatus(); break;
-      case '9':
+      case '9': printConfigStatus(); break;
+      case '0':
         await saveToExcel();
         console.log('\n  Data opgeslagen. Tot ziens!\n');
         running = false;
@@ -194,7 +202,13 @@ async function runConfigWizard(ask) {
   console.log('    SMTP_PASS=jouw-wachtwoord');
   console.log('    EMAIL_FROM_ADDRESS=jouw-email@bedrijf.com');
   console.log('    COMPANY_NAME=Richfield Distribution');
-  console.log('    OPENAI_API_KEY=sk-...  (optioneel)\n');
+  console.log('    OPENAI_API_KEY=sk-...  (optioneel)');
+  console.log('');
+  console.log('  Voor inbox monitoring (reply detectie):');
+  console.log('    IMAP_HOST=outlook.office365.com');
+  console.log('    IMAP_PORT=993');
+  console.log('    IMAP_USER=jouw-email@bedrijf.com');
+  console.log('    IMAP_PASS=jouw-wachtwoord\n');
   console.log('  Na het invullen, herstart met: npm start');
   console.log('  ── WIZARD VOLTOOID ─────────────────────\n');
 }
@@ -407,6 +421,10 @@ async function runDashboard() {
 
 async function runReminders(ask) {
   console.log('\n  ── REMINDERS ───────────────────────────\n');
+  console.log(`  Instellingen:`);
+  console.log(`    Niet geopend:       reminder na ${config.reminders.unopenedAfterHours} uur`);
+  console.log(`    Geopend, geen reply: reminder na ${config.reminders.openedNoReplyAfterHours} uur`);
+  console.log(`    Max reminders:      ${config.reminders.maxReminders}`);
 
   const candidates = showReminderCandidates();
   if (candidates.length === 0) return;
@@ -431,6 +449,116 @@ async function runReminders(ask) {
   await processReminders(contacts, priceMatrix);
   await saveToExcel();
   console.log('  Tracking data opgeslagen.\n');
+}
+
+// ─────────────────────────────────────────────────────────
+//  CHECK REPLIES (INBOX MONITORING)
+// ─────────────────────────────────────────────────────────
+
+async function runCheckReplies(ask) {
+  console.log('\n  ── INBOX CHECKEN (REPLIES) ─────────────\n');
+
+  if (!canMonitorInbox()) {
+    console.log('  IMAP is niet geconfigureerd.');
+    console.log('  Vul in je .env bestand:\n');
+    console.log('    IMAP_HOST=outlook.office365.com');
+    console.log('    IMAP_PORT=993');
+    console.log('    IMAP_USER=jouw-email@bedrijf.com');
+    console.log('    IMAP_PASS=jouw-wachtwoord\n');
+    return;
+  }
+
+  // Laad contacten
+  let contacts;
+  try {
+    contacts = cachedContacts || await readContacts();
+    cachedContacts = contacts;
+  } catch {
+    console.log('  Klantenbestand niet gevonden. Kan replies niet matchen.');
+    contacts = [];
+  }
+
+  console.log('  Inbox controleren op replies...');
+
+  try {
+    const replies = await checkForReplies(contacts);
+    printReplies(replies);
+
+    if (replies.length === 0) return;
+
+    // Log de replies in tracking
+    let newReplies = 0;
+    for (const reply of replies) {
+      const record = logReply(reply.from, {
+        preview: reply.textContent.substring(0, 200),
+      });
+      if (record) {
+        newReplies++;
+        // Update contact Excel
+        if (reply.contact) {
+          try { await updateContactReplied(reply.contact); } catch { /* niet fataal */ }
+        }
+      }
+    }
+
+    if (newReplies > 0) {
+      console.log(`\n  ${newReplies} nieuwe reply(s) gelogd in tracking.`);
+      await saveToExcel();
+    }
+
+    // Auto-reply optie
+    if (ask && config.autoReply.enabled && hasAI()) {
+      const unanswered = replies.filter((r) => {
+        const rec = getAllRecords().find(
+          (tr) => tr.email.toLowerCase() === r.from.toLowerCase()
+        );
+        return rec && !rec.autoReplied;
+      });
+
+      if (unanswered.length > 0) {
+        console.log(`\n  ${unanswered.length} reply(s) waar nog niet automatisch op gereageerd is.`);
+        const confirm = await ask('  Auto-replies versturen? [j/n]: ');
+
+        if (confirm.trim().toLowerCase() === 'j' || confirm.trim().toLowerCase() === 'ja') {
+          let priceMatrix;
+          try { priceMatrix = cachedPriceMatrix || await readPriceMatrix(); } catch { priceMatrix = null; }
+
+          for (const reply of unanswered) {
+            const pricing = reply.contact && priceMatrix
+              ? lookupPricesForContact(priceMatrix, reply.contact)
+              : null;
+
+            console.log(`\n  Auto-reply naar ${reply.fromName || reply.from}...`);
+            try {
+              const result = await processAutoReply(reply, pricing);
+              if (result.success) {
+                const rec = getAllRecords().find(
+                  (tr) => tr.email.toLowerCase() === reply.from.toLowerCase()
+                );
+                if (rec) {
+                  const { logAutoReply } = require('./excel/trackingLog');
+                  logAutoReply(rec.trackingId);
+                }
+                console.log('  -> Auto-reply verstuurd!');
+              } else {
+                console.log(`  -> Mislukt: ${result.error}`);
+              }
+            } catch (err) {
+              console.log(`  -> Fout: ${err.message}`);
+            }
+
+            await sleep(2000);
+          }
+          await saveToExcel();
+        }
+      }
+    } else if (ask && replies.length > 0 && !config.autoReply.enabled) {
+      console.log('\n  Tip: Zet AUTO_REPLY_ENABLED=true in .env om automatisch te reageren.');
+    }
+  } catch (err) {
+    console.log(`\n  Fout bij inbox check: ${err.message}`);
+    console.log('  Controleer je IMAP instellingen in .env\n');
+  }
 }
 
 // ─────────────────────────────────────────────────────────
@@ -529,10 +657,12 @@ async function runContactManager(ask) {
     cachedContacts = contacts;
 
     console.log(`  ${contacts.length} klant(en) geladen:\n`);
-    console.log('  ' + 'No'.padEnd(4) + 'Company'.padEnd(18) + 'Name'.padEnd(16) + 'Country'.padEnd(14) + 'POD'.padEnd(14) + 'Incoterms'.padEnd(10) + 'Sent');
-    console.log('  ' + '-'.repeat(86));
+    console.log('  ' + 'No'.padEnd(4) + 'Company'.padEnd(18) + 'Name'.padEnd(16) + 'Country'.padEnd(14) + 'POD'.padEnd(14) + 'Sent'.padEnd(8) + 'Opened'.padEnd(9) + 'Replied');
+    console.log('  ' + '-'.repeat(95));
     contacts.forEach((c) => {
-      const sent = c.emailSent && c.emailSent.toLowerCase() === 'yes' ? `Yes (${c.emailSentDate})` : '-';
+      const sent = c.emailSent && c.emailSent.toLowerCase() === 'yes' ? 'Yes' : '-';
+      const opened = c.emailOpened && c.emailOpened.toLowerCase() === 'yes' ? 'Yes' : '-';
+      const replied = c.emailReplied && c.emailReplied.toLowerCase() === 'yes' ? 'Yes' : '-';
       console.log(
         '  ' +
         String(c.no).padEnd(4) +
@@ -540,8 +670,9 @@ async function runContactManager(ask) {
         c.name.substring(0, 15).padEnd(16) +
         c.country.substring(0, 13).padEnd(14) +
         c.pod.substring(0, 13).padEnd(14) +
-        c.incoterms.padEnd(10) +
-        sent
+        sent.padEnd(8) +
+        opened.padEnd(9) +
+        replied
       );
     });
   } catch {
@@ -577,41 +708,52 @@ async function runContactManager(ask) {
     }
   } else if (choice.trim() === '2') {
     console.log('\n  Verwacht Excel formaat (klanten):');
-    console.log('  No | Company | Name | Country | POD | Continent | Incoterms | E-mail adress | Email_Sent | Email_Sent_Date | Email_Status');
+    console.log('  No | Company | Name | Country | POD | Continent | Incoterms | E-mail adress |');
+    console.log('  Email_Sent | Email_Sent_Date | Email_Opened | Email_Opened_Date |');
+    console.log('  Email_Replied | Email_Replied_Date | Email_Status');
   }
 }
 
 // ─────────────────────────────────────────────────────────
-//  SMTP TEST
+//  CONNECTION TEST (SMTP + IMAP)
 // ─────────────────────────────────────────────────────────
 
-async function runSmtpTest() {
-  console.log('\n  ── SMTP VERBINDING TESTEN ──────────────\n');
+async function runConnectionTest() {
+  console.log('\n  ── VERBINDING TESTEN ──────────────────\n');
 
+  // SMTP test
+  console.log('  SMTP (email verzenden):');
   if (!canSendEmails()) {
-    console.log('  SMTP is niet geconfigureerd.');
-    console.log('  Vul in je .env bestand:\n');
-    console.log('    SMTP_HOST=smtp.office365.com');
-    console.log('    SMTP_PORT=587');
-    console.log('    SMTP_USER=jouw-email@bedrijf.com');
-    console.log('    SMTP_PASS=jouw-wachtwoord\n');
-    return;
+    console.log('    Niet geconfigureerd. Vul SMTP_USER en SMTP_PASS in .env');
+  } else {
+    console.log(`    Server: ${config.smtp.host}:${config.smtp.port}`);
+    console.log(`    User:   ${config.smtp.user}`);
+    console.log('    Verbinden...');
+    const smtpOk = await testConnection();
+    if (smtpOk) {
+      console.log('    SMTP verbinding geslaagd!\n');
+    } else {
+      console.log('    SMTP verbinding mislukt.');
+      console.log('    Controleer host, poort en wachtwoord.\n');
+    }
   }
 
-  console.log(`  Server: ${config.smtp.host}:${config.smtp.port}`);
-  console.log(`  User:   ${config.smtp.user}`);
-  console.log('  Verbinden...');
-
-  const ok = await testConnection();
-  if (ok) {
-    console.log('\n  Verbinding geslaagd! Je kunt emails versturen.\n');
+  // IMAP test
+  console.log('  IMAP (inbox monitoring):');
+  if (!canMonitorInbox()) {
+    console.log('    Niet geconfigureerd. Vul IMAP_HOST, IMAP_USER en IMAP_PASS in .env');
+    console.log('    Outlook: outlook.office365.com poort 993\n');
   } else {
-    console.log('\n  Verbinding mislukt. Controleer:');
-    console.log('  - Is SMTP_HOST correct? (Outlook: smtp.office365.com)');
-    console.log('  - Is SMTP_PORT correct? (587)');
-    console.log('  - Is het wachtwoord juist?');
-    console.log('  - Is SMTP/POP ingeschakeld in je Outlook instellingen?');
-    console.log('  - Staat MFA aan? Dan heb je mogelijk een App Password nodig.\n');
+    console.log(`    Server: ${config.imap.host}:${config.imap.port}`);
+    console.log(`    User:   ${config.imap.user}`);
+    console.log('    Verbinden...');
+    const imapOk = await testImapConnection();
+    if (imapOk) {
+      console.log('    IMAP verbinding geslaagd!\n');
+    } else {
+      console.log('    IMAP verbinding mislukt.');
+      console.log('    Controleer host, poort en wachtwoord.\n');
+    }
   }
 }
 

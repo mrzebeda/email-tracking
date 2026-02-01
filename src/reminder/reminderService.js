@@ -1,41 +1,59 @@
 const config = require('../config');
-const { getUnopenedEmails, logReminderSent, getAllRecords } = require('../excel/trackingLog');
+const { getUnopenedEmails, getOpenedNotRepliedEmails, logReminderSent, getAllRecords } = require('../excel/trackingLog');
 const { generateReminderEmail } = require('../email/templateGenerator');
 const { sendTrackedEmail } = require('../email/sender');
 const { lookupPricesForContact } = require('../excel/productReader');
 
 /**
- * Controleer en verstuur reminders voor ongeopende emails
+ * Verwerk alle reminders:
+ * 1. Ongeopende emails (na X uur)
+ * 2. Geopende maar niet beantwoorde emails (na X uur na eerste open)
  */
 async function processReminders(contacts, priceMatrix) {
   const unopened = getUnopenedEmails();
+  const openedNotReplied = getOpenedNotRepliedEmails();
 
-  if (unopened.length === 0) {
-    console.log('Geen ongeopende emails gevonden die een reminder nodig hebben.');
+  if (unopened.length === 0 && openedNotReplied.length === 0) {
+    console.log('  Geen emails gevonden die een reminder nodig hebben.');
     return { sent: 0, failed: 0, skipped: 0 };
   }
 
-  console.log(`\n${unopened.length} ongeopende email(s) gevonden voor reminder.`);
-
   const results = { sent: 0, failed: 0, skipped: 0 };
 
-  for (const record of unopened) {
-    // Zoek het originele contact
+  // Verwerk ongeopende emails
+  if (unopened.length > 0) {
+    console.log(`\n  ${unopened.length} ongeopende email(s) - reminder na ${config.reminders.unopenedAfterHours}u:`);
+    await sendRemindersForRecords(unopened, contacts, priceMatrix, results, 'niet geopend');
+  }
+
+  // Verwerk geopende maar niet beantwoorde emails
+  if (openedNotReplied.length > 0) {
+    console.log(`\n  ${openedNotReplied.length} geopend maar niet beantwoord - reminder na ${config.reminders.openedNoReplyAfterHours}u:`);
+    await sendRemindersForRecords(openedNotReplied, contacts, priceMatrix, results, 'geopend, geen reply');
+  }
+
+  console.log(`\n  Reminder resultaten: ${results.sent} verstuurd, ${results.failed} mislukt, ${results.skipped} overgeslagen.`);
+  return results;
+}
+
+/**
+ * Verstuur reminders voor een lijst tracking records
+ */
+async function sendRemindersForRecords(records, contacts, priceMatrix, results, reason) {
+  for (const record of records) {
     const contact = contacts.find((c) => c.email === record.email);
     if (!contact) {
-      console.log(`Contact niet gevonden voor ${record.email}, overslaan.`);
+      console.log(`    Contact niet gevonden voor ${record.email}, overslaan.`);
       results.skipped++;
       continue;
     }
 
     const reminderNumber = record.remindersSent + 1;
-    console.log(`\nReminder #${reminderNumber} voorbereiden voor ${contact.name} (${contact.email})...`);
+    console.log(`    Reminder #${reminderNumber} voor ${contact.name} (${reason})...`);
 
     try {
-      // Zoek POD-specifieke prijzen voor dit contact
       const pricing = priceMatrix ? lookupPricesForContact(priceMatrix, contact) : null;
 
-      // Genereer reminder email
       const emailContent = await generateReminderEmail(
         contact,
         pricing,
@@ -43,7 +61,6 @@ async function processReminders(contacts, priceMatrix) {
         reminderNumber
       );
 
-      // Verstuur
       const result = await sendTrackedEmail(contact, emailContent, {
         campaign: `${record.campaign}_reminder${reminderNumber}`,
         trackingId: `${record.trackingId}_r${reminderNumber}`,
@@ -51,23 +68,19 @@ async function processReminders(contacts, priceMatrix) {
 
       if (result.success) {
         logReminderSent(record.trackingId);
-        console.log(`Reminder verstuurd naar ${contact.email}`);
+        console.log(`    -> Verstuurd naar ${contact.email}`);
         results.sent++;
       } else {
-        console.error(`Reminder mislukt voor ${contact.email}: ${result.error}`);
+        console.error(`    -> Mislukt: ${result.error}`);
         results.failed++;
       }
     } catch (error) {
-      console.error(`Fout bij reminder voor ${contact.email}:`, error.message);
+      console.error(`    -> Fout: ${error.message}`);
       results.failed++;
     }
 
-    // Korte pauze tussen emails (rate limiting)
     await sleep(2000);
   }
-
-  console.log(`\nReminder resultaten: ${results.sent} verstuurd, ${results.failed} mislukt, ${results.skipped} overgeslagen.`);
-  return results;
 }
 
 /**
@@ -75,26 +88,48 @@ async function processReminders(contacts, priceMatrix) {
  */
 function showReminderCandidates() {
   const unopened = getUnopenedEmails();
+  const openedNotReplied = getOpenedNotRepliedEmails();
 
-  if (unopened.length === 0) {
-    console.log('\nGeen emails die een reminder nodig hebben.');
+  if (unopened.length === 0 && openedNotReplied.length === 0) {
+    console.log('\n  Geen emails die een reminder nodig hebben.');
     return [];
   }
 
-  console.log(`\n${unopened.length} email(s) die een reminder nodig hebben:`);
-  console.log('-'.repeat(80));
+  const all = [];
 
-  unopened.forEach((r) => {
-    const hoursSince = Math.round(
-      (Date.now() - new Date(r.sentAt).getTime()) / (1000 * 60 * 60)
-    );
-    console.log(
-      `  ${r.email.padEnd(30)} | ${r.contactName.padEnd(15)} | ` +
-      `${hoursSince}u geleden | Reminders: ${r.remindersSent}/${config.reminders.maxReminders}`
-    );
-  });
+  if (unopened.length > 0) {
+    console.log(`\n  ONGEOPEND (reminder na ${config.reminders.unopenedAfterHours}u):`);
+    console.log('  ' + '-'.repeat(85));
 
-  return unopened;
+    unopened.forEach((r) => {
+      const hoursSince = Math.round(
+        (Date.now() - new Date(r.sentAt).getTime()) / (1000 * 60 * 60)
+      );
+      console.log(
+        `    ${r.email.padEnd(28)} | ${r.contactName.padEnd(14)} | ` +
+        `${hoursSince}u geleden | Reminders: ${r.remindersSent}/${config.reminders.maxReminders}`
+      );
+      all.push({ ...r, reason: 'ongeopend' });
+    });
+  }
+
+  if (openedNotReplied.length > 0) {
+    console.log(`\n  GEOPEND MAAR NIET BEANTWOORD (reminder na ${config.reminders.openedNoReplyAfterHours}u):`);
+    console.log('  ' + '-'.repeat(85));
+
+    openedNotReplied.forEach((r) => {
+      const hoursSinceOpen = Math.round(
+        (Date.now() - new Date(r.firstOpenAt).getTime()) / (1000 * 60 * 60)
+      );
+      console.log(
+        `    ${r.email.padEnd(28)} | ${r.contactName.padEnd(14)} | ` +
+        `${r.opens}x geopend | ${hoursSinceOpen}u sinds open | Reminders: ${r.remindersSent}/${config.reminders.maxReminders}`
+      );
+      all.push({ ...r, reason: 'geopend, geen reply' });
+    });
+  }
+
+  return all;
 }
 
 function sleep(ms) {

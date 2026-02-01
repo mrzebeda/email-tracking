@@ -46,10 +46,24 @@ const config = {
     salesTitle: process.env.SALES_PERSON_TITLE || 'Sales',
   },
 
+  // IMAP (voor inbox monitoring / reply detectie)
+  imap: {
+    host: process.env.IMAP_HOST || 'outlook.office365.com',
+    port: parseInt(process.env.IMAP_PORT || '993'),
+    user: process.env.IMAP_USER || process.env.SMTP_USER,
+    pass: process.env.IMAP_PASS || process.env.SMTP_PASS,
+  },
+
   // Reminders
   reminders: {
-    afterHours: parseInt(process.env.REMINDER_AFTER_HOURS || '48'),
+    unopenedAfterHours: parseInt(process.env.REMINDER_UNOPENED_AFTER_HOURS || process.env.REMINDER_AFTER_HOURS || '48'),
+    openedNoReplyAfterHours: parseInt(process.env.REMINDER_OPENED_NO_REPLY_AFTER_HOURS || '72'),
     maxReminders: parseInt(process.env.MAX_REMINDERS || '2'),
+  },
+
+  // Auto-reply
+  autoReply: {
+    enabled: process.env.AUTO_REPLY_ENABLED === 'true',
   },
 
   // Bestanden
@@ -126,6 +140,14 @@ function validateConfig() {
     help: 'Standaard: http://localhost:3001/track\n   Voor productie: stel je Netlify URL in.',
   });
 
+  // IMAP
+  checks.push({
+    name: 'IMAP inbox (IMAP_HOST + IMAP_USER)',
+    ok: !!(config.imap.user && config.imap.pass),
+    required: false,
+    help: 'Vul IMAP_HOST, IMAP_USER en IMAP_PASS in je .env voor reply detectie.\n   Outlook: outlook.office365.com poort 993.',
+  });
+
   return checks;
 }
 
@@ -174,8 +196,16 @@ function hasAI() {
   return !!(config.openai.apiKey);
 }
 
+/**
+ * Check of inbox monitoring beschikbaar is
+ */
+function canMonitorInbox() {
+  return !!(config.imap.user && config.imap.pass);
+}
+
 module.exports = config;
 module.exports.validateConfig = validateConfig;
 module.exports.printConfigStatus = printConfigStatus;
 module.exports.canSendEmails = canSendEmails;
 module.exports.hasAI = hasAI;
+module.exports.canMonitorInbox = canMonitorInbox;

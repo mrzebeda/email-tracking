@@ -9,6 +9,7 @@
     "send": "node src/agent.js --send",
     "check": "node src/agent.js --check",
     "remind": "node src/agent.js --remind",
+    "replies": "node src/agent.js --replies",
     "dashboard": "node src/agent.js --dashboard",
     "server": "node src/tracking/server.js",
     "status": "node src/agent.js --status"
@@ -17,6 +18,8 @@
     "dotenv": "^16.4.5",
     "exceljs": "^4.4.0",
     "express": "^4.21.0",
+    "imapflow": "^1.0.164",
+    "mailparser": "^3.7.1",
     "nodemailer": "^6.9.15",
     "openai": "^4.67.0",
     "uuid": "^10.0.0"

@@ -96,6 +96,10 @@ async function createContactTemplate(dataDir) {
     { header: 'E-mail adress', key: 'email', width: 35 },
     { header: 'Email_Sent', key: 'emailSent', width: 12 },
     { header: 'Email_Sent_Date', key: 'emailSentDate', width: 16 },
+    { header: 'Email_Opened', key: 'emailOpened', width: 14 },
+    { header: 'Email_Opened_Date', key: 'emailOpenedDate', width: 18 },
+    { header: 'Email_Replied', key: 'emailReplied', width: 14 },
+    { header: 'Email_Replied_Date', key: 'emailRepliedDate', width: 18 },
     { header: 'Email_Status', key: 'emailStatus', width: 14 },
   ];
 
@@ -135,9 +139,13 @@ async function createTrackingTemplate(dataDir) {
     { header: 'Opens', key: 'opens', width: 8 },
     { header: 'Eerste Open', key: 'firstOpenAt', width: 22 },
     { header: 'Laatste Open', key: 'lastOpenAt', width: 22 },
+    { header: 'Beantwoord', key: 'replied', width: 12 },
+    { header: 'Beantwoord Op', key: 'repliedAt', width: 22 },
+    { header: 'Reply Preview', key: 'replyPreview', width: 40 },
+    { header: 'Auto-Reply', key: 'autoReplied', width: 12 },
     { header: 'Reminders', key: 'remindersSent', width: 10 },
     { header: 'Laatste Reminder', key: 'lastReminderAt', width: 22 },
-    { header: 'Status', key: 'status', width: 15 },
+    { header: 'Status', key: 'status', width: 18 },
   ];
 
   ws.getRow(1).font = { bold: true, color: { argb: 'FFFFFFFF' } };

@@ -35,9 +35,13 @@ async function initTrackingLog(filePath) {
         opens: parseInt(row.getCell(8).value) || 0,
         firstOpenAt: String(row.getCell(9).value || ''),
         lastOpenAt: String(row.getCell(10).value || ''),
-        remindersSent: parseInt(row.getCell(11).value) || 0,
-        lastReminderAt: String(row.getCell(12).value || ''),
-        status: String(row.getCell(13).value || 'verzonden'),
+        replied: String(row.getCell(11).value || '') === 'true',
+        repliedAt: String(row.getCell(12).value || ''),
+        replyPreview: String(row.getCell(13).value || ''),
+        autoReplied: String(row.getCell(14).value || '') === 'true',
+        remindersSent: parseInt(row.getCell(15).value) || 0,
+        lastReminderAt: String(row.getCell(16).value || ''),
+        status: String(row.getCell(17).value || 'verzonden'),
       });
     });
 
@@ -62,6 +66,10 @@ function logEmailSent(data) {
     opens: 0,
     firstOpenAt: '',
     lastOpenAt: '',
+    replied: false,
+    repliedAt: '',
+    replyPreview: '',
+    autoReplied: false,
     remindersSent: 0,
     lastReminderAt: '',
     status: 'verzonden',
@@ -88,10 +96,61 @@ function logEmailOpen(trackingId) {
     record.firstOpenAt = now;
   }
   record.lastOpenAt = now;
-  record.status = 'geopend';
+
+  // Status update: geopend, tenzij al beantwoord
+  if (!record.replied) {
+    record.status = 'geopend';
+  }
 
   trackingStore.set(trackingId, record);
   console.log(`Email geopend: ${record.email} (${record.opens}x) [${trackingId}]`);
+  return record;
+}
+
+/**
+ * Registreer dat een klant geantwoord heeft
+ */
+function logReply(email, replyData) {
+  // Zoek het tracking record voor dit email adres
+  const records = getAllRecords();
+  const record = records.find(
+    (r) => r.email.toLowerCase() === email.toLowerCase() && !r.replied
+  );
+
+  if (!record) {
+    // Probeer een record te vinden dat al beantwoord is (meerdere replies)
+    const anyRecord = records.find(
+      (r) => r.email.toLowerCase() === email.toLowerCase()
+    );
+    if (anyRecord) {
+      anyRecord.repliedAt = new Date().toISOString();
+      anyRecord.replyPreview = (replyData.preview || '').substring(0, 200);
+      trackingStore.set(anyRecord.trackingId, anyRecord);
+      return anyRecord;
+    }
+    return null;
+  }
+
+  record.replied = true;
+  record.repliedAt = new Date().toISOString();
+  record.replyPreview = (replyData.preview || '').substring(0, 200);
+  record.status = 'beantwoord';
+
+  trackingStore.set(record.trackingId, record);
+  console.log(`Reply gelogd: ${email} [${record.trackingId}]`);
+  return record;
+}
+
+/**
+ * Registreer dat er automatisch is gereageerd op een reply
+ */
+function logAutoReply(trackingId) {
+  const record = trackingStore.get(trackingId);
+  if (!record) return null;
+
+  record.autoReplied = true;
+  record.status = 'auto-beantwoord';
+  trackingStore.set(trackingId, record);
   return record;
 }
 
@@ -128,14 +187,34 @@ function getRecord(trackingId) {
  * Haal ongeopende emails op die ouder zijn dan X uur
  */
 function getUnopenedEmails(afterHours) {
-  const hours = afterHours || config.reminders.afterHours;
+  const hours = afterHours || config.reminders.unopenedAfterHours;
   const cutoff = new Date(Date.now() - hours * 60 * 60 * 1000).toISOString();
   const maxReminders = config.reminders.maxReminders;
 
   return getAllRecords().filter((record) => {
     return (
       record.opens === 0 &&
+      !record.replied &&
       record.sentAt < cutoff &&
+      record.remindersSent < maxReminders
+    );
+  });
+}
+
+/**
+ * Haal emails op die geopend zijn maar niet beantwoord, ouder dan X uur na eerste open
+ */
+function getOpenedNotRepliedEmails(afterHours) {
+  const hours = afterHours || config.reminders.openedNoReplyAfterHours;
+  const cutoff = new Date(Date.now() - hours * 60 * 60 * 1000).toISOString();
+  const maxReminders = config.reminders.maxReminders;
+
+  return getAllRecords().filter((record) => {
+    return (
+      record.opens > 0 &&
+      !record.replied &&
+      record.firstOpenAt &&
+      record.firstOpenAt < cutoff &&
       record.remindersSent < maxReminders
     );
   });
@@ -161,36 +240,45 @@ async function saveToExcel(filePath) {
     { header: 'Opens', key: 'opens', width: 8 },
     { header: 'Eerste Open', key: 'firstOpenAt', width: 22 },
     { header: 'Laatste Open', key: 'lastOpenAt', width: 22 },
+    { header: 'Beantwoord', key: 'replied', width: 12 },
+    { header: 'Beantwoord Op', key: 'repliedAt', width: 22 },
+    { header: 'Reply Preview', key: 'replyPreview', width: 40 },
+    { header: 'Auto-Reply', key: 'autoReplied', width: 12 },
     { header: 'Reminders', key: 'remindersSent', width: 10 },
     { header: 'Laatste Reminder', key: 'lastReminderAt', width: 22 },
-    { header: 'Status', key: 'status', width: 15 },
+    { header: 'Status', key: 'status', width: 18 },
   ];
 
   // Style header row
-  ws.getRow(1).font = { bold: true };
+  ws.getRow(1).font = { bold: true, color: { argb: 'FFFFFFFF' } };
   ws.getRow(1).fill = {
     type: 'pattern',
     pattern: 'solid',
     fgColor: { argb: 'FF4472C4' },
   };
-  ws.getRow(1).font = { bold: true, color: { argb: 'FFFFFFFF' } };
 
   // Data
   const records = getAllRecords();
   records.forEach((record) => {
     const row = ws.addRow(record);
     // Kleur op basis van status
-    if (record.opens > 0) {
+    if (record.replied) {
       row.getCell('status').fill = {
         type: 'pattern',
         pattern: 'solid',
-        fgColor: { argb: 'FF92D050' }, // groen
+        fgColor: { argb: 'FF2196F3' }, // blauw - beantwoord
+      };
+    } else if (record.opens > 0) {
+      row.getCell('status').fill = {
+        type: 'pattern',
+        pattern: 'solid',
+        fgColor: { argb: 'FF92D050' }, // groen - geopend
       };
     } else if (record.remindersSent > 0) {
       row.getCell('status').fill = {
         type: 'pattern',
         pattern: 'solid',
-        fgColor: { argb: 'FFFFC000' }, // oranje
+        fgColor: { argb: 'FFFFC000' }, // oranje - reminder
       };
     }
   });
@@ -200,10 +288,12 @@ async function saveToExcel(filePath) {
   const total = records.length;
   const opened = records.filter((r) => r.opens > 0).length;
   const unopened = records.filter((r) => r.opens === 0).length;
+  const replied = records.filter((r) => r.replied).length;
+  const openedNotReplied = records.filter((r) => r.opens > 0 && !r.replied).length;
   const totalOpens = records.reduce((sum, r) => sum + r.opens, 0);
 
   summary.columns = [
-    { header: 'Metriek', key: 'metric', width: 25 },
+    { header: 'Metriek', key: 'metric', width: 30 },
     { header: 'Waarde', key: 'value', width: 15 },
   ];
   summary.getRow(1).font = { bold: true };
@@ -212,6 +302,9 @@ async function saveToExcel(filePath) {
   summary.addRow({ metric: 'Geopend', value: opened });
   summary.addRow({ metric: 'Niet geopend', value: unopened });
   summary.addRow({ metric: 'Open rate', value: total > 0 ? `${((opened / total) * 100).toFixed(1)}%` : '0%' });
+  summary.addRow({ metric: 'Beantwoord', value: replied });
+  summary.addRow({ metric: 'Reply rate', value: total > 0 ? `${((replied / total) * 100).toFixed(1)}%` : '0%' });
+  summary.addRow({ metric: 'Geopend, niet beantwoord', value: openedNotReplied });
   summary.addRow({ metric: 'Totaal opens', value: totalOpens });
   summary.addRow({ metric: 'Gem. opens per email', value: opened > 0 ? (totalOpens / opened).toFixed(1) : '0' });
 
@@ -227,36 +320,43 @@ function printDashboard() {
   const total = records.length;
   const opened = records.filter((r) => r.opens > 0).length;
   const unopened = records.filter((r) => r.opens === 0).length;
+  const replied = records.filter((r) => r.replied).length;
+  const openedNotReplied = records.filter((r) => r.opens > 0 && !r.replied).length;
   const totalOpens = records.reduce((sum, r) => sum + r.opens, 0);
 
   console.log('\n====================================');
   console.log('   EMAIL TRACKING DASHBOARD');
   console.log('====================================');
-  console.log(`Totaal verzonden:    ${total}`);
-  console.log(`Geopend:             ${opened}`);
-  console.log(`Niet geopend:        ${unopened}`);
-  console.log(`Open rate:           ${total > 0 ? ((opened / total) * 100).toFixed(1) : 0}%`);
-  console.log(`Totaal opens:        ${totalOpens}`);
+  console.log(`Totaal verzonden:        ${total}`);
+  console.log(`Geopend:                 ${opened}`);
+  console.log(`Niet geopend:            ${unopened}`);
+  console.log(`Open rate:               ${total > 0 ? ((opened / total) * 100).toFixed(1) : 0}%`);
+  console.log(`Beantwoord:              ${replied}`);
+  console.log(`Reply rate:              ${total > 0 ? ((replied / total) * 100).toFixed(1) : 0}%`);
+  console.log(`Geopend, niet beantw.:   ${openedNotReplied}`);
+  console.log(`Totaal opens:            ${totalOpens}`);
   console.log('------------------------------------');
 
   if (records.length > 0) {
     console.log('\nDetail per email:');
-    console.log('-'.repeat(90));
+    console.log('-'.repeat(105));
     console.log(
-      'Email'.padEnd(30) +
-      'Contact'.padEnd(15) +
-      'Opens'.padEnd(8) +
-      'Status'.padEnd(15) +
+      'Email'.padEnd(28) +
+      'Contact'.padEnd(14) +
+      'Opens'.padEnd(7) +
+      'Reply'.padEnd(7) +
+      'Status'.padEnd(18) +
       'Verzonden'
     );
-    console.log('-'.repeat(90));
+    console.log('-'.repeat(105));
 
     records.forEach((r) => {
       console.log(
-        r.email.padEnd(30) +
-        r.contactName.substring(0, 14).padEnd(15) +
-        String(r.opens).padEnd(8) +
-        r.status.padEnd(15) +
+        r.email.substring(0, 27).padEnd(28) +
+        r.contactName.substring(0, 13).padEnd(14) +
+        String(r.opens).padEnd(7) +
+        (r.replied ? 'Ja' : '-').padEnd(7) +
+        r.status.substring(0, 17).padEnd(18) +
         (r.sentAt ? r.sentAt.substring(0, 16) : '')
       );
     });
@@ -269,10 +369,13 @@ module.exports = {
   initTrackingLog,
   logEmailSent,
   logEmailOpen,
+  logReply,
+  logAutoReply,
   logReminderSent,
   getAllRecords,
   getRecord,
   getUnopenedEmails,
+  getOpenedNotRepliedEmails,
   saveToExcel,
   printDashboard,
   trackingStore,
