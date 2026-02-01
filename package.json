@@ -10,7 +10,8 @@
     "check": "node src/agent.js --check",
     "remind": "node src/agent.js --remind",
     "dashboard": "node src/agent.js --dashboard",
-    "server": "node src/tracking/server.js"
+    "server": "node src/tracking/server.js",
+    "status": "node src/agent.js --status"
   },
   "dependencies": {
     "dotenv": "^16.4.5",
